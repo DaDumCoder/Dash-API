@@ -2,7 +2,7 @@ const { ethers } = require("ethers");
 
 // Connect to the Soneium RPC endpoint
 const RPC_URL = "https://rpc.soneium.org";
-const provider = new ethers.JsonRpcProvider(RPC_URL);
+const provider = new ethers.providers.JsonRpcProvider(RPC_URL); // ✅ Fixed constructor
 
 // Smart contract address
 const contractMap = {
@@ -11,7 +11,7 @@ const contractMap = {
 
 // Completion threshold
 const completionThresholds = {
-  claimedpoints: 10000, // ✅ FIXED key name
+  claimedpoints: 10000,
 };
 
 // Minimal ABI
@@ -32,7 +32,7 @@ module.exports = async (req, res) => {
     try {
       const contract = new ethers.Contract(contractAddress, ABI, provider);
       const balanceBN = await contract.balanceOf(address);
-      const balance = parseFloat(ethers.formatUnits(balanceBN, 18));
+      const balance = parseFloat(ethers.utils.formatUnits(balanceBN, 18)); // ✅ formatUnits
 
       rawBalances[key] = balance;
 
@@ -64,12 +64,13 @@ module.exports = async (req, res) => {
   let chainName = "unknown";
   try {
     const network = await provider.getNetwork();
-    chainId = network.chainId;
+    chainId = Number(network.chainId); // ✅ Convert to Number to avoid BigInt error
     chainName = network.name !== "unknown" ? network.name : "soneium";
   } catch (err) {
     // fallback silently
   }
 
+  // ✅ Final response with only serializable data
   res.status(200).json({
     wallet: address,
     chainId,
