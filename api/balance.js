@@ -1,40 +1,73 @@
 const { ethers } = require("ethers");
 
-const TOKEN_CONTRACT_ADDRESS = "0xD1CAe16ec9eC34CE906F2C425B554042CA04Fa4E";
-const ERC20_ABI = [
-  "function balanceOf(address owner) view returns (uint256)",
-  "function decimals() view returns (uint8)",
-  "function symbol() view returns (string)"
-];
+// Connect to the Soneium RPC endpoint
+const RPC_URL = "https://rpc.soneium.org";
+const provider = new ethers.JsonRpcProvider(RPC_URL);
 
+// Smart contract addresses for different point types
+const contractMap = {
+  claimedpoints: "0xD1CAe16ec9eC34CE906F2C425B554042CA04Fa4E",
+};
+
+// Thresholds to determine if a user has completed a task
+const completionThresholds = {
+  claimedpoint: 10000,
+};
+
+// Minimal ABI to call balanceOf on ERC-20 contracts
+const ABI = ["function balanceOf(address) view returns (uint256)"];
+
+// Main API handler function
 module.exports = async (req, res) => {
-  const wallet = req.query.wallet;
-  const RPC_URL = process.env.RPC_URL;
+  const { address } = req.query;
 
-  if (!wallet) {
-    return res.status(400).json({ error: "Missing wallet address" });
+// Validate the wallet address
+  if (!address || !ethers.isAddress(address)) {
+    return res.status(400).json({ error: "Invalid wallet address" });
   }
 
-  try {
-    const provider = new ethers.providers.JsonRpcProvider(RPC_URL);
-    const contract = new ethers.Contract(TOKEN_CONTRACT_ADDRESS, ERC20_ABI, provider);
+  const rawBalances = {};  // Stores raw balances without transformation
+  const data = {};         // Final formatted data to return
+  let totalPoints = 0;     // Will hold the calculated total with multiplier
 
-    const [balanceRaw, decimals, symbol] = await Promise.all([
-      contract.balanceOf(wallet),
-      contract.decimals(),
-      contract.symbol()
-    ]);
+// Fetch balance from each contract
+  for (const [key, contractAddress] of Object.entries(contractMap)) {
+    try {
+      const contract = new ethers.Contract(contractAddress, ABI, provider);
+      const balanceBN = await contract.balanceOf(address); // Get raw balance (BigNumber)
+      const balance = parseFloat(ethers.formatUnits(balanceBN, 18)); // Convert to decimal
 
-    const balance = ethers.utils.formatUnits(balanceRaw, decimals);
+      rawBalances[key] = balance; // Save for later multiplier math
 
-    res.status(200).json({
-      chain: "Soneium Mainnet",
-      wallet,
-      token: TOKEN_CONTRACT_ADDRESS,
-      symbol,
-      balance
-    });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
+      const threshold = completionThresholds[key];
+      const completed = typeof threshold === "number" ? balance > threshold : null;
+
+      data[key] = {
+        balance,      // Original balance
+        completed     // Completion status based on threshold
+      };
+    } catch (error) {
+      data[key] = {
+        balance: null,
+        completed: false,
+        error: error.message
+      };
+    }
   }
+
+  // Apply multiplier
+  const claimedPoints = rawBalances.claimedpoints || 0;
+
+  const totalCalculatedPoints = claimedPoints;
+
+  // Override claimedpoints balance to show total
+  if (data.claimedpoints) {
+    data.claimedpoints.balance = parseFloat(totalCalculatedPoints.toFixed(2));
+  }
+
+  res.status(200).json({
+    wallet: address,
+    data,
+    totalPoints: parseFloat(totalCalculatedPoints.toFixed(2))
+  });
 };
